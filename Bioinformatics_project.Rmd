@@ -1,0 +1,176 @@
+---
+title: "Bioinformatics_project"
+output: html_document
+date: "2024-04-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+#if (!require("BiocManager", quietly = TRUE))
+  #install.packages("BiocManager")
+
+#BiocManager::install("DESeq2")
+#BiocManager::install("ComplexHeatmap")
+#BiocManager::install('clusterProfiler')
+#BiocManager::install("org.Mm.eg.db")
+#BiocManager::install("gprofiler")
+#BiocManager::install("EnhancedVolcano")
+#BiocManager::install("ggplot2")
+#BiocManager::install("WGCNA")
+
+```
+
+```{r}
+
+library(dplyr)
+library(readr)
+library(DESeq2)
+library(ggplot2)
+library(ComplexHeatmap)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(ggrepel)
+library(EnhancedVolcano)
+library(WGCNA)
+
+```
+
+```{r}
+
+counts <- read.csv('counts_table.csv', row.names = 1, header = TRUE)
+metadata <- read.csv('project_metadata.csv', row.names = 1, header = TRUE)
+
+```
+
+
+
+```{r}
+
+only_counts <- counts %>% 
+  dplyr::select(-Chr,-Start,-End, -Strand, -Length) %>% 
+  dplyr::rename(SRR24206827 = Aln_MidAge_PBS.sam , SRR24206825 = Aln_MidAge_SARS_CoV2.sam , SRR24206826 = Aln_Young_PBS.sam , SRR24206824 = Aln_Young_SARS_CoV2.sam)
+
+```
+
+
+```{r}
+
+dds <- DESeqDataSetFromMatrix(countData = only_counts, colData = metadata, design = ~ Treatment)
+counts(dds)
+subset <-  dds[(rowSums(counts(dds)) >= 10),]
+
+```
+
+rowsubset_dds <- dds[rowSums(counts(dds))>10]
+
+```{r}
+
+filter_counts <- dds[rowSums(counts(dds))>10]
+filter_counts
+```
+
+```{r}
+
+relevel(dds$Treatment, ref = 'PBS')
+deseq_ob <- DESeq(subset)
+
+```
+
+
+```{r}
+
+countdds <- DESeq(filter_counts)
+counts(countdds, normalized=T)
+
+```
+
+```{r}
+
+res <- results(countdds, alpha = 0.05)
+res
+summary(res)
+
+```
+
+```{r}
+
+plotMA(countdds)
+
+```
+
+
+```{r}
+
+sigs.df <-  as.data.frame(res)
+sigs.df$symbol <- mapIds(org.Mm.eg.db, keys= rownames(sigs.df), keytype = 'ENSEMBL', colum = "SYMBOL")
+
+```
+
+
+```{r}
+
+sigs.df = as.data.frame(res)
+EnhancedVolcano(sigs.df, x='log2FoldChange', y='padj', lab = sigs.df$symbol)
+
+```
+
+
+```{r}
+EnhancedVolcano(res,
+  lab = sigs.df$symbol,
+  x = 'log2FoldChange',
+  y = 'pvalue',
+  title = 'N061011 versus N61311',
+  pCutoff = 10e-16,
+  FCcutoff = 1.5,
+  pointSize = 3.0,
+  labSize = 6.0,
+  col=c('black', 'black', 'black', 'red3'),
+  colAlpha = 1)
+
+```
+
+
+
+
+```{r}
+
+diff.df <- as.data.frame(sigs.df)
+diff.df <- diff.df %>%
+  filter(padj < 0.05)
+
+mat <- counts(deseq_ob, normalized = T)[rownames(diff.df),]
+mat.z <- t(apply(mat,1, scale))
+colnames(mat.z) <- colnames(mat)
+Heatmap(mat.z, cluster_rows= T, cluster_columns= T, name = "Z-score", row_labels = diff.df[rownames(mat.z),]$symbol)
+
+```
+
+```{r}
+
+diff.df <- as.data.frame(sigs.df)
+diff.df <- diff.df %>%
+  filter(padj < 0.05, log2FoldChange > 4, baseMean > 100)
+
+mat <- counts(deseq_ob, normalized = T)[rownames(diff.df),]
+mat.z <- t(apply(mat,1, scale))
+colnames(mat.z) <- colnames(mat)
+Heatmap(mat.z, cluster_rows= T, cluster_columns= T, name = "Z-score", row_labels = diff.df[rownames(mat.z),]$symbol)
+
+```
+
+
+```{r}
+
+genes_to_test <- rownames(diff.df)
+GO_results <- enrichGO(gene = genes_to_test, OrgDb = "org.Mm.eg.db", keyType = 'ENSEMBL', ont = "BP")
+fit <- plot(barplot(GO_results, showCategory=10))
+
+```
+
+
